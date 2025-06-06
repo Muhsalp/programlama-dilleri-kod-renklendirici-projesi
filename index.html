@@ -1,0 +1,500 @@
+<!doctype html>
+<html><head>
+<meta charset="utf-8"/>
+<style>
+*{box-sizing: border-box;}
+html{height: 100%;}
+body{height: 100%; display: flex; margin: 0px;}
+#sol{position: relative; flex: 1;}
+#sag{width: 400px; padding: 10px; background: #eee; overflow: auto;}
+#renklikod{position: absolute; top: 0px; left: 0px; width: 100%; height: 100%; padding: 10px; font: 16px monospace; white-space: pre-wrap; word-wrap: break-word; pointer-events: none;}
+#kodalani{position: absolute; top: 0px; left: 0px; width: 100%; height: 100%; padding: 10px; background: transparent; font: 16px monospace; color: transparent; caret-color: #000; border: none; outline: none; resize: none;}
+
+#renklikod .komut{color: blue; font-weight: bold;}
+#renklikod .sayi{color: darkorange;}
+#renklikod .tanimlayici{color: black;}
+#renklikod .operator{color: crimson;}
+#renklikod .dizge{color: green;}
+#renklikod .parantez{color: gray;}
+#renklikod .hata{background: #f002; color: red; font-weight: bold;}
+
+#agac{font: 14px monospace;}
+#agac .ad{font-weight: bold; color: #e12;}
+#agac .dizi{display: inline-block; border: dotted 2px #888; border-radius: 5px;}
+#agac .dizi:empty::before{display: inline-block; margin: 4px; content: "Boş";}
+#agac .dizi > .deger{margin: 4px;}
+#agac .nesne{display: inline-block; border: solid 2px #000; border-radius: 5px;}
+#agac .nesne .baslik{padding: 2px; background: #000; color: #fff;}
+#agac .nesne .icerik{padding: 2px;}
+#agac .nesne .icerik .ozellik{padding: 2px;}
+#agac .nesne .icerik .ozellik > .deger{margin: 4px 10px;}
+</style>
+</head><body>
+<div id="sol"><div id="renklikod"></div><textarea id="kodalani" spellcheck="false" autocapitalize="off" autocorrect="off"></textarea></div>
+<div id="sag"><div id="agac"></div></div>
+<script>
+const kurallar = [
+{tur: "komut", bicim: /^(let|const|if|else|for|while|do|function|return|break)\b/},
+{tur: "mantiksal", bicim: /^(true|false)\b/},
+{tur: "tanimlayici", bicim: /^[a-zA-Z_][a-zA-Z0-9_]*/},
+{tur: "sayi", bicim: /^\d+(\.\d+)?/},
+{tur: "dizge", bicim: /^"[^\n]*?"|^'[^\n]*?'/},
+{tur: "yorum", bicim: /^(\/\/[^\n]*|\/\*[\s\S]*?\*\/)/},
+{tur: "operator", bicim: /^(;|,|:|\.|\?|===|==|=|!==|!=|!|<=|<|>=|>|\+=|\+\+|\+|\-=|\-\-|\-|\*=|\*|\/=|\/|%=|%)/},
+{tur: "parantez", bicim: /^[\(\)\{\}\[\]]/},
+{tur: "bosluk", bicim: /^\s+/}
+];
+
+function al(tur, deger){
+let parca = parcalar[suanki];
+if(parca && parca.tur==="bosluk"){suanki++; parca = parcalar[suanki];}
+if(parca){
+if(!tur){return true;}
+if(parca.tur===tur && (!deger || (Array.isArray(deger)?deger.includes(parca.deger):parca.deger===deger))){suanki++; return parca;}
+}
+return false;
+}
+
+function isle(tur, deger){
+const parca = parcalar[suanki];
+if(parca && parca.tur==="bosluk"){suanki++; parca = parcalar[suanki];}
+if(!parca){hata = true; throw {tur: "hata", tip: "kodsonu"};}
+suanki++;
+if(parca.tur===tur && (!deger || (Array.isArray(deger)?deger.includes(parca.deger):parca.deger===deger))){return parca;}
+hata = true; parca.tur = "hata"; return {tur: "hata", deger: parca};
+}
+
+const ayristir = {
+
+program: function(){
+const govde = [];
+while(true){
+if(al()){
+govde.push(ayristir.deyim());
+}else{break;}
+}
+return {tur: "program", govde};
+},
+
+deyim: function(){
+if(al("komut", "if")){return ayristir.kosulkontrolu();}
+if(al("komut", "for")){return ayristir.ucifadelidongu();}
+if(al("komut", "while")){return ayristir.onkosulludongu();}
+if(al("komut", "do")){return ayristir.sonkosulludongu();}
+if(al("komut", "function")){return ayristir.fonksiyontanimi();}
+if(al("komut", "return")){return ayristir.dondurmedeyimi();}
+if(al("komut", "break")){return ayristir.kirmadeyimi();}
+return ayristir.atamadeyimi();
+},
+
+atamadeyimi: function(){
+const atama = ayristir.atama();
+isle("operator", ";");
+return atama;
+},
+
+kosulkontrolu: function(){
+isle("parantez", "(");
+const kosul = ayristir.ifade();
+isle("parantez", ")");
+const govde = ayristir.deyimler();
+return {tur: "kosulkontrolu", kosul, govde};
+},
+
+ucifadelidongu: function(){
+isle("parantez", "(");
+const baslangic = ayristir.atama();
+isle("operator", ";");
+const kosul = ayristir.ifade();
+isle("operator", ";");
+const degisim = ayristir.atama();
+isle("parantez", ")");
+const govde = ayristir.deyimler();
+return {tur: "ucifadelidongu", baslangic, kosul, degisim, govde};
+},
+
+onkosulludongu: function(){
+isle("parantez", "(");
+const kosul = ayristir.ifade();
+isle("parantez", ")");
+const govde = ayristir.deyimler();
+return {tur: "onkosulludongu", kosul, govde};
+},
+
+sonkosulludongu: function(){
+const govde = ayristir.deyimler();
+isle("komut", "while");
+isle("parantez", "(");
+const kosul = ayristir.ifade();
+isle("parantez", ")");
+isle("operator", ";");
+return {tur: "sonkosulludongu", govde, kosul};
+},
+
+fonksiyontanimi: function(){
+const ad = ayristir.tanimlayici();
+isle("parantez", "(");
+const parametreler = [];
+if(!al("parantez", ")")){
+do{
+parametreler.push(ayristir.tanimlayici());
+}while(al("operator", ","));
+isle("parantez", ")");
+}
+isle("parantez", "{");
+const govde = [];
+while(!al("parantez", "}")){
+govde.push(ayristir.deyim());
+}
+return {tur: "fonksiyontanimi", ad, parametreler, govde};
+},
+
+dondurmedeyimi: function(){
+const deger = ayristir.ifade();
+isle("operator", ";");
+return {tur: "dondurmedeyimi", deger};
+},
+
+kirmadeyimi: function(){
+isle("operator", ";");
+return {tur: "kirmadeyimi"};
+},
+
+deyimler: function(){
+if(al("parantez", "{")){
+const deyimler = [];
+while(!al("parantez", "}")){
+deyimler.push(ayristir.deyim());
+}
+return deyimler;
+}else{
+return [ayristir.deyim()];
+}
+},
+
+atama: function(){
+if(al("komut", "let")){return ayristir.degiskentanimi("degisken");}
+if(al("komut", "const")){return ayristir.degiskentanimi("sabit");}
+let operator = al("operator", ["++", "--"]);
+if(operator){return ayristir.kisaatamaislemi("onek", operator);}
+const degisken = ayristir.degisken();
+operator = al("operator", ["++", "--"]);
+if(operator){return ayristir.kisaatamaislemi("sonek", operator, degisken);}
+operator = al("operator", ["=", "+=", "-=", "*=", "/=", "%="]);
+if(operator){return ayristir.atamaislemi(degisken, operator);}
+if(degisken.tur === "fonksiyoncagrisi"){return ayristir.fonksiyoncagrisi(degisken);}
+return isle(false);
+},
+
+degiskentanimi: function(tip){
+const ad = ayristir.tanimlayici();
+let deger = null;
+if(al("operator", "=")){
+deger = ayristir.ifade();
+}
+return {tur: "degiskentanimi", tip, ad, deger};
+},
+
+atamaislemi: function(hedef, operator){
+const deger = ayristir.ifade();
+return {tur: "atamaislemi", hedef, operator, deger};
+},
+
+kisaatamaislemi: function(tip, operator, hedef){
+if(tip === "onek"){
+hedef = ayristir.degisken();
+}
+return {tur: "kisaatamaislemi", tip, hedef, operator};
+},
+
+fonksiyoncagrisi: function(kaynak){
+return kaynak;
+},
+
+ifade: function(){
+const kosul = ayristir.birlesim();
+if(al("operator", "?")){
+const dogru = ayristir.ifade();
+isle("operator", ":");
+const yanlis = ayristir.ifade();
+return {tur: "ucluifade", kosul, dogru, yanlis};
+}
+return kosul;
+},
+
+birlesim: function(){
+let sol = ayristir.kesisim();
+while(true){
+const operator = al("operator", "||");
+if(operator){
+const sag = ayristir.kesisim();
+sol = {tur: "ikiliislem", operator, sol, sag};
+}else{
+break;
+}
+}
+return sol;
+},
+
+kesisim: function(){
+let sol = ayristir.esitlik();
+while(true){
+const operator = al("operator", "&&");
+if(operator){
+const sag = ayristir.esitlik();
+sol = {tur: "ikiliislem", operator, sol, sag};
+}else{
+break;
+}
+}
+return sol;
+},
+
+esitlik: function(){
+let sol = ayristir.karsilastirma();
+while(true){
+const operator = al("operator", ["==", "!=", "===", "!=="]);
+if(operator){
+const sag = ayristir.karsilastirma();
+sol = {tur: "ikiliislem", operator, sol, sag};
+}else{
+break;
+}
+}
+return sol;
+},
+
+karsilastirma: function(){
+let sol = ayristir.islem();
+while(true){
+const operator = al("operator", ["<", ">", "<=", ">="]);
+if(operator){
+const sag = ayristir.islem();
+sol = {tur: "ikiliislem", operator, sol, sag};
+}else{
+break;
+}
+}
+return sol;
+},
+
+islem: function(){
+let sol = ayristir.terim();
+while(true){
+const operator = al("operator", ["+", "-"]);
+if(operator){
+const sag = ayristir.terim();
+sol = {tur: "ikiliislem", operator, sol, sag};
+}else{
+break;
+}
+}
+return sol;
+},
+
+terim: function(){
+let sol = ayristir.carpan();
+while(true){
+const operator = al("operator", ["*", "/", "%"]);
+if(operator){
+const sag = ayristir.carpan();
+sol = {tur: "ikiliislem", operator, sol, sag};
+}else{
+break;
+}
+}
+return sol;
+},
+
+carpan: function(){
+if(al("parantez", "(")){
+const ifade = ayristir.ifade();
+isle("parantez", ")");
+return ifade;
+}
+const operator = al("operator", ["!", "-"]);
+if(operator){
+const deger = ayristir.carpan();
+return {tur: "tekliislem", operator, deger};
+}
+return ayristir.birim();
+},
+
+birim: function(){
+let deger = al("sayi");
+if(deger){return ayristir.sayi(deger);}
+deger = al("dizge");
+if(deger){return ayristir.dizge(deger);}
+if(al("mantiksal", "true")){return ayristir.mantiksal("dogru");}
+if(al("mantiksal", "false")){return ayristir.mantiksal("yanlis");}
+if(al("parantez", "[")){return ayristir.dizi();}
+if(al("parantez", "{")){return ayristir.nesne();}
+let operator = al("operator", ["++", "--"]);
+if(operator){return ayristir.kisaatamaislemi("onek", operator);}
+deger = ayristir.degisken();
+operator = al("operator", ["++", "--"]);
+if(operator){return ayristir.kisaatamaislemi("sonek", operator, deger);}
+return deger;
+},
+
+degisken: function(){
+let kaynak = ayristir.tanimlayici();
+while(true){
+if(al("parantez", "(")){
+const parametreler = [];
+if(!al("parantez", ")")){
+do{
+parametreler.push(ayristir.ifade());
+}while(al("operator", ","));
+isle("parantez", ")");
+}
+kaynak = {tur: "fonksiyoncagrisi", kaynak, parametreler};
+}else if(al("parantez", "[")){
+const indis = ayristir.ifade();
+isle("parantez", "]");
+kaynak = {tur: "dizielemani", kaynak, indis};
+}else if(al("operator", ".")){
+const ad = ayristir.tanimlayici();
+kaynak = {tur: "nesneozelligi", kaynak, ad};
+}else{
+break;
+}
+}
+return kaynak;
+},
+
+dizi: function(){
+const elemanlar = [];
+if(!al("parantez", "]")){
+do{
+elemanlar.push(ayristir.ifade());
+}while(al("operator", ","));
+isle("parantez", "]");
+}
+return {tur: "dizi", elemanlar};
+},
+
+nesne: function(){
+const ozellikler = [];
+if(!al("parantez", "}")){
+do{
+const ad = ayristir.tanimlayici();
+let deger;
+if(al("operator", ":")){
+deger = ayristir.ifade();
+}else{
+deger = ad;
+}
+ozellikler.push({tur: "ozellik", ad, deger});
+}while(al("operator", ","));
+isle("parantez", "}");
+}
+return {tur: "nesne", ozellikler};
+},
+
+tanimlayici: function(){
+const deger = isle("tanimlayici");
+return deger;
+},
+
+sayi: function(deger){
+return deger;
+},
+
+dizge: function(deger){
+return deger;
+},
+
+mantiksal: function(deger){
+return {tur: "mantiksal", deger};
+}
+
+};
+
+function agac(oge){
+if(Array.isArray(oge)){
+let html = "";
+for(const eleman of oge){
+html += agac(eleman);
+}
+return "<div class='deger'><div class='dizi'>"+html+"</div></div>";
+}else if(typeof oge==="object" && oge!==null){
+let html = "";
+for(const [ad, deger] of Object.entries(oge)){
+if(ad!=="tur"){
+html += "<div class='ozellik'><span class='ad'>"+ad+":</span> "+agac(deger)+"</div>";
+}
+}
+return "<div class='deger'><div class='nesne'><div class='baslik'>"+oge.tur+"</div><div class='icerik'>"+html+"</div></div></div>";
+}else{
+return oge;
+}
+}
+
+function calistir(){
+
+let kod = kodalani.value;
+parcalar = [];
+hata = false;
+
+while(kod.length > 0){
+let eslesme = false;
+for(const kural of kurallar){
+const eslesmeler = kod.match(kural.bicim);
+if(eslesmeler){
+parcalar.push({tur: kural.tur, deger: eslesmeler[0]});
+kod = kod.slice(eslesmeler[0].length);
+eslesme = true;
+break;
+}
+}
+if(!eslesme){
+hata = true;
+parcalar.push({tur: "hata", deger: kod[0]});
+kod = kod.slice(1);
+}
+}
+
+suanki = 0;
+
+try{document.getElementById("agac").innerHTML = agac(ayristir.program());}catch{}
+if(hata){document.getElementById("agac").innerHTML = "Hatalı kod.";}
+
+let html = "";
+for(const parca of parcalar){
+html += parca.tur==="bosluk"?parca.deger:"<span class='"+parca.tur+"'>"+parca.deger.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")+"</span>";
+}
+renklikod.innerHTML = html;
+
+}
+
+const kodalani = document.getElementById("kodalani");
+const renklikod = document.getElementById("renklikod");
+
+kodalani.addEventListener("input", calistir);
+
+kodalani.addEventListener("keydown", function(e){
+if(e.key === "Tab"){
+e.preventDefault();
+const bas = kodalani.selectionStart;
+const son = kodalani.selectionEnd;
+const kod = kodalani.value;
+kodalani.value = kod.substring(0, bas) + "    " + kod.substring(son);
+kodalani.selectionStart = bas + 4;
+kodalani.selectionEnd = bas + 4;
+calistir();
+}
+});
+
+kodalani.addEventListener("scroll", function(){
+renklikod.scrollTop = kodalani.scrollTop;
+renklikod.scrollLeft = kodalani.scrollLeft;
+});
+
+let parcalar;
+let suanki;
+let hata;
+
+calistir();
+</script>
+</body></html>
